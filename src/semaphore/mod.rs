@@ -10,7 +10,7 @@ struct InnerSemaphore {
 
 impl InnerSemaphore {
     fn new(max_count: u32) -> Self {
-        Self { count: AtomicU32::new(0), ref_count: AtomicUsize::new(1), max_count }
+        Self { count: AtomicU32::new(max_count), ref_count: AtomicUsize::new(1), max_count }
     }
 
     fn init_with(max_count: u32, init_val: u32) -> Self {
@@ -102,15 +102,63 @@ unsafe impl Send for Semaphore {}
 unsafe impl Sync for Semaphore {}
 
 
-
 #[cfg(test)]
 mod test {
     use super::*;
     use std::thread;
+    use std::sync::{Barrier, Arc};
 
     #[test]
     fn test_binary_semaphore_single_reader_single_writer() {
-        // let m
-        todo!()
+        // For counting the number of additions
+        static mut COUNTER: u32 = 0;
+        // For guarding access to the static variable
+        let semaphore = Semaphore::new(1);
+        // For signaling threads are finished
+        let barrier = Arc::new(Barrier::new(6));
+
+        for i in 0..5 {
+            let semaphore = semaphore.clone();
+            let barrier = barrier.clone();
+            thread::spawn(move || {
+                for j in 0..100 {
+                    semaphore.wait();
+                    unsafe { COUNTER += 1; }
+                    semaphore.signal();
+                }
+                barrier.wait();
+            });
+        }
+
+        barrier.wait();
+
+        println!("The value of COUNTER = {}", unsafe { COUNTER } );
+        assert_eq!(unsafe { COUNTER }, 500);
+
+        static mut COUNTS: [u32; 3] = [0, 0, 0];
+        let barrier = Arc::new(Barrier::new(4));
+
+        for i in 0..3 {
+            let semaphore = semaphore.clone();
+            let barrier = barrier.clone();
+            thread::spawn(move || {
+                for _ in 0..100 {
+                    semaphore.wait();
+                    unsafe {
+                        COUNTS[0] += i + 1;
+                        COUNTS[1] += i + 1;
+                        COUNTS[2] += i + 1;
+                    }
+                    semaphore.signal();
+                }
+                barrier.wait();
+            });
+        }
+
+        barrier.wait();
+        println!("The value of COUNTS = {:?}", unsafe { COUNTS });
+        assert_eq!(unsafe { COUNTS[0] }, 600);
+        assert_eq!(unsafe { COUNTS[1] }, 600);
+        assert_eq!(unsafe { COUNTS[2] }, 600);
     }
 }
